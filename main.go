@@ -94,23 +94,12 @@ func mapIPstoMAC(ips ...string) ([]*DeviceInfo, error) {
 }
 
 func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
-	//fromIP := net.ParseIP(from.IP)
-
 	toMAC, err := net.ParseMAC(to.MAC)
 	if err != nil {
 		return err
 	}
 
 	toIP := net.ParseIP(to.IP)
-	/*
-		ip := layers.IPv4{
-			Version:  4,
-			TTL:      64,
-			Protocol: layers.IPProtocolTCP,
-			SrcIP:    fromIP,
-			DstIP:    toIP,
-		}
-	*/
 
 	eth := layers.Ethernet{
 		SrcMAC:       attackerInfo.MAC,
