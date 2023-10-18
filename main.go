@@ -239,7 +239,17 @@ func readPackets(deviceHandle *pcap.Handle) error {
 	packetSource := gopacket.NewPacketSource(deviceHandle, deviceHandle.LinkType())
 
 	for packet := range packetSource.Packets() {
-		fmt.Println(packet.Dump())
+		arpLayer := packet.Layer(layers.LayerTypeARP)
+		if arpLayer == nil {
+			continue
+		}
+		arp := arpLayer.(*layers.ARP)
+		fmt.Println(arp.Operation)
+		fmt.Println("source mac: ", net.HardwareAddr(arp.SourceHwAddress).String())
+		fmt.Println("source ip: ", net.IP(arp.SourceProtAddress).String())
+		fmt.Println("dst mac: ", net.HardwareAddr(arp.DstHwAddress).String())
+		fmt.Println("dst ip: ", net.IP(arp.DstProtAddress).String())
+		fmt.Println()
 	}
 
 	return nil
