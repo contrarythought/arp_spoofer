@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"testing"
 
 	"github.com/google/gopacket"
@@ -21,4 +22,14 @@ func TestSerializeBuffer(t *testing.T) {
 	bytes, _ = buf.PrependBytes(1)
 
 	fmt.Println("3: ", buf.Bytes())
+}
+
+func TestOutboundIP(t *testing.T) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		t.Error(err)
+	}
+	defer conn.Close()
+
+	fmt.Println(conn.LocalAddr().String())
 }
