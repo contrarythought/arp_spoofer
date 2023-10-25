@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -137,6 +138,34 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 	}
 
 	return nil
+}
+
+// TODO: test
+func getAllIPs(attackerIP net.IP) []net.IP {
+	ipnet := net.IPNet{
+		IP:   attackerIP,
+		Mask: attackerIP.DefaultMask(),
+	}
+
+	ipAsUint := binary.BigEndian.Uint32(ipnet.IP.To4())
+	maskAsUint := binary.BigEndian.Uint32(ipnet.Mask)
+
+	network := ipAsUint & maskAsUint
+	broadcast := network | ^maskAsUint
+
+	var addresses []net.IP
+
+	for network++; network < broadcast; network++ {
+		b1 := uint8(network & 0xff)
+		b2 := uint8((network >> 8) & 0xff)
+		b3 := uint8((network >> 16) & 0xff)
+		b4 := uint8((network >> 24) & 0xff)
+
+		ipAddr := net.IPv4(b4, b3, b2, b1)
+		addresses = append(addresses, ipAddr)
+	}
+
+	return addresses
 }
 
 func poisonARPCache(devicesInfo []*DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {

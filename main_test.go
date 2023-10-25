@@ -86,12 +86,36 @@ func TestGetAllIPs(t *testing.T) {
 	binary.BigEndian.PutUint32(orignet[:], orignetwork)
 	broadcast := orignetwork | ^mask
 
-	for network := orignetwork + 1; network < broadcast; network++ {
-		var buf [4]byte
-		binary.BigEndian.PutUint32(buf[:], network)
+	startHost := binary.BigEndian.Uint32(networkPortion.To4())
+	b1 = uint8(startHost & 0xff)
+	b2 = uint8((startHost >> 8) & 0xff)
+	b3 = uint8((startHost >> 16) & 0xff)
+	b4 = uint8((startHost >> 24) & 0xff)
 
-		//ip := net.IPv4(buf[0], buf[1], buf[2], buf[3])
+	sh := net.IPv4(b1, b2, b3, b4)
+	fmt.Println("uin32 to ip: ", sh.String())
 
-		//fmt.Println(ip.String())
+	fmt.Println("br: ", broadcast)
+	fmt.Println("st:", startHost)
+
+	defmask := binary.BigEndian.Uint32(ipnet.IP.DefaultMask())
+
+	shost := startHost & ^defmask
+	b1 = uint8(shost & 0xff)
+	b2 = uint8((shost >> 8) & 0xff)
+	b3 = uint8((shost >> 16) & 0xff)
+	b4 = uint8((shost >> 24) & 0xff)
+
+	sip := net.IPv4(b4, b3, b2, b1)
+	fmt.Println(sip.String())
+
+	for startHost++; startHost < broadcast; startHost++ {
+		b1 = uint8(startHost & 0xff)
+		b2 = uint8((startHost >> 8) & 0xff)
+		b3 = uint8((startHost >> 16) & 0xff)
+		b4 = uint8((startHost >> 24) & 0xff)
+
+		theip := net.IPv4(b4, b3, b2, b1)
+		fmt.Println(theip.String())
 	}
 }
