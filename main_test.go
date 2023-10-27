@@ -36,7 +36,7 @@ func TestOutboundIP(t *testing.T) {
 	fmt.Println(conn.LocalAddr().String())
 }
 
-func TestGetAllIPs(t *testing.T) {
+func TestGenIPRange(t *testing.T) {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
 		t.Error(err)
@@ -117,5 +117,15 @@ func TestGetAllIPs(t *testing.T) {
 
 		theip := net.IPv4(b4, b3, b2, b1)
 		fmt.Println(theip.String())
+	}
+}
+
+func TestGetAllIPs(t *testing.T) {
+	ip := "10.0.0.0"
+
+	addresses := getAllIPs(net.ParseIP(ip).To4())
+
+	for _, address := range addresses {
+		fmt.Println(address.String())
 	}
 }

