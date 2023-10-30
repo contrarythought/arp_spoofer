@@ -1,6 +1,7 @@
 package main
 
 import (
+	"arp_spoof/network"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -123,7 +124,7 @@ func TestGenIPRange(t *testing.T) {
 func TestGetAllIPs(t *testing.T) {
 	ip := "10.0.0.0"
 
-	addresses := getAllIPs(net.ParseIP(ip).To4())
+	addresses := network.GetAllIPs(net.ParseIP(ip).To4())
 
 	for _, address := range addresses {
 		fmt.Println(address.String())

