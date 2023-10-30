@@ -47,7 +47,7 @@ func main() {
 	defer deviceHandle.Close()
 
 	if *gateway == "" {
-		log.Fatal("err: gateway IP required\n", flag.Usage)
+		log.Fatal("err: gateway IP required")
 	}
 
 	if *all {
@@ -56,7 +56,7 @@ func main() {
 		}
 	} else {
 		if *victim == "" {
-			log.Fatal("err: victim IP required\n", flag.Usage)
+			log.Fatal("err: victim IP required")
 		}
 
 		if err := app.ArpSpoof(*gateway, *victim, *netInterface, deviceHandle); err != nil {
