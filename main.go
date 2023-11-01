@@ -3,6 +3,7 @@ package main
 import (
 	"arp_spoof/app"
 	"arp_spoof/network"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -16,8 +17,14 @@ import (
 // flags
 var (
 	all          = flag.Bool("all", false, "target all devices on a network")
+	enableIPFor  = flag.Bool("enipfor", false, "enable IP forwarding")
+	disableIPFor = flag.Bool("disipfor", false, "disable IP forwarding")
 	gateway      = flag.String("gate", "", "IP address of the network's gateway")
 	victim       = flag.String("vic", "", "IP address of the victim's device")
+
+	// TODO
+	inject = flag.String("inj", "", "file location of code to inject, or code to inject directly")
+
 	netInterface = flag.String("int", "Wi-Fi", "network interface to employ attack")
 )
 
@@ -48,6 +55,22 @@ func main() {
 
 	if *gateway == "" {
 		log.Fatal("err: gateway IP required")
+	}
+
+	if *enableIPFor && *disableIPFor {
+		log.Fatal(errors.New("err: can either enable or disable IP forwarding, not both"))
+	}
+
+	if *enableIPFor {
+		if err := network.EnableIPForwarding(*netInterface); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	if *disableIPFor {
+		if err := network.DisableIPForwarding(*netInterface); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	if *all {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -77,6 +78,77 @@ func Ping(ips []net.IP) []net.IP {
 	wg.Wait()
 
 	return liveAddresses
+}
+
+func EnableIPForwarding(netInterface string) error {
+	cmd := exec.Command("powershell", "Get-NetIPInterface | select ifIndex,InterfaceAlias,AddressFamily,ConnectionState,Forwarding | Sort-Object -Property IfIndex | Format-Table")
+	out, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(out), "\n")
+	idx := 0
+	for _, line := range lines {
+		if strings.Contains(line, netInterface) {
+			fields := strings.Fields(line)
+			if strings.TrimSpace(fields[1]) != netInterface {
+				continue
+			}
+			idx, err = strconv.Atoi(fields[0])
+			if err != nil {
+				return err
+			}
+			enabled := fields[4]
+			if enabled == "Enabled" {
+				fmt.Println("IP forwarding is already enabled on interface: ", netInterface)
+				return nil
+			} else {
+				script := fmt.Sprintf("Start-Process -FilePath powershell -ArgumentList '-NoProfile', '-ExecutionPolicy Bypass', '-Command Set-NetIPInterface -InterfaceIndex %d -Forwarding Enabled' -Verb runas", idx)
+				cmd := exec.Command("powershell", "-Command", script)
+				if err := cmd.Run(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func DisableIPForwarding(netInterface string) error {
+	cmd := exec.Command("powershell", "Get-NetIPInterface | select ifIndex,InterfaceAlias,AddressFamily,ConnectionState,Forwarding | Sort-Object -Property IfIndex | Format-Table")
+	out, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(out), "\n")
+	idx := 0
+	for _, line := range lines {
+		if strings.Contains(line, netInterface) {
+			fields := strings.Fields(line)
+			if strings.TrimSpace(fields[1]) != netInterface {
+				continue
+			}
+			idx, err = strconv.Atoi(fields[0])
+			if err != nil {
+				return err
+			}
+			disabled := fields[4]
+			if disabled == "Disabled" {
+				fmt.Println("IP forwarding already disabled for interface: ", netInterface)
+				return nil
+			} else {
+				script := fmt.Sprintf("Start-Process -FilePath powershell -ArgumentList '-NoProfile', '-ExecutionPolicy Bypass', '-Command Set-NetIPInterface -InterfaceIndex %d -Forwarding Disabled' -Verb runas", idx)
+				cmd := exec.Command("powershell", "-Command", script)
+				if err := cmd.Run(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func MapIPstoMAC(ips []net.IP) ([]*DeviceInfo, error) {

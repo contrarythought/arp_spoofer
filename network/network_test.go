@@ -22,3 +22,15 @@ func TestGetAttackerIP(t *testing.T) {
 
 	fmt.Println(myIP.String())
 }
+
+func TestEnableIPForwarding(t *testing.T) {
+	if err := EnableIPForwarding("Wi-Fi"); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestDisableIPForwarding(t *testing.T) {
+	if err := DisableIPForwarding("Wi-Fi"); err != nil {
+		t.Error(err)
+	}
+}

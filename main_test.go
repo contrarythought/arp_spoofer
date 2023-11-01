@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -129,4 +130,33 @@ func TestGetAllIPs(t *testing.T) {
 	for _, address := range addresses {
 		fmt.Println(address.String())
 	}
+}
+
+func TestRunPSAdmin(t *testing.T) {
+	cmd := exec.Command("powershell", "Get-NetIPInterface | select ifIndex,InterfaceAlias,AddressFamily,ConnectionState,Forwarding | Sort-Object -Property IfIndex | Format-Table")
+	std, err := cmd.Output()
+	if err != nil {
+		t.Error(err)
+	}
+
+	fmt.Println(string(std))
+
+	/*
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Error(err)
+		}
+
+		go func() {
+			defer stdin.Close()
+			fmt.Fprintln(stdin, "Start-Process powershell -Verb runas")
+		}()
+
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Error(err)
+		}
+
+		fmt.Println(string(out))
+	*/
 }
