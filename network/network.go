@@ -48,6 +48,10 @@ func GetAllIPs(attackerIP net.IP) []net.IP {
 		b4 := uint8((network >> 24) & 0xff)
 
 		ipAddr := net.IPv4(b4, b3, b2, b1)
+		if ipAddr.To4().Equal(attackerIP.To4()) {
+			continue
+		}
+
 		addresses = append(addresses, ipAddr)
 	}
 
